@@ -5,6 +5,7 @@ import pandas as pd
 import time
 from datetime import datetime
 from dotenv import load_dotenv
+import psycopg2
 
 # Load environment variables from .env (for local testing)
 load_dotenv()
