@@ -1,0 +1,6 @@
+.env
+output_tweets.csv
+output_tweets_With_Timestamp.csv
+Footium_Community_Tweets_Latest.csv
+cron_job.log
+output_tweets_15.csv
