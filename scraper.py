@@ -36,7 +36,7 @@ def log_message(message):
 def fetch_tweets():
     """Fetch tweets and save them to a CSV file"""
     url = "https://api.x.com/2/lists/1651199577985261569/tweets"
-    querystring = {"max_results": "100"}
+    querystring = {"max_results": "10"}
 
     response = requests.get(url, headers=HEADERS, params=querystring)
 
@@ -45,23 +45,94 @@ def fetch_tweets():
         df = pd.DataFrame(data.get("data", []))
         df.to_csv(INPUT_CSV, index=False)
         log_message("Fetched and saved tweets successfully.")
+        return df
     else:
         log_message(f"Error fetching tweets: {response.status_code}")
 
 
-def get_authorid_from_post(tweet_id):
-    """Fetch author ID from tweet ID"""
-    url = f"https://api.x.com/2/tweets/{tweet_id}"
-    querystring = {"tweet.fields": "author_id"}
+# I want to update this to get the author_id, tweet_timestamp & public_metrics
+#querystring = {"tweet.fields":["author_id","public_metrics"],"user.fields":"username"}
 
-    response = requests.get(url, headers=HEADERS, params=querystring)
+# If I do lookup by Ids can I do this in one go?
+# Can I get the context from all the tweets in the list in one?
+def get_context_from_post(tweets):
+    """Fetch author ID and public metrics from tweet ID"""
+
+    tweet_ids = list(tweets['id'])
+    ids_string = ",".join(tweet_ids)
+
+    querystring = {
+        "ids": ids_string,
+        "tweet.fields": "author_id,public_metrics,created_at"  # Include additional fields as needed
+    }
+
+    response = requests.get(
+        "https://api.x.com/2/tweets", 
+        headers=HEADERS, 
+        params=querystring
+    )
+
+    context_data = response.json()
+    context_df = pd.DataFrame(context_data['data'])
+    print("context_df: ", context_df, "\n\n")
+
+    author_ids = []
+    for tweet in response.json().get("data", []):
+        author_ids.append(tweet.get("author_id"))
+
+    author_ids_string = ",".join(author_ids)
+
+    author_querystring = {
+        "ids": author_ids_string,
+        "user.fields": "username"
+    }
+    author_response = requests.get(
+        "https://api.x.com/2/users", 
+        headers=HEADERS, 
+        params=author_querystring
+    )
+
+    author_data = author_response.json()
+    author_data = author_data['data']
+
+# Create a DataFrame from the extracted data
+    author_df = pd.DataFrame(author_data)
+
+    print("author_df: ", author_df, "\n\n")
+    print("author_response: ", author_response.json(), "\n\n")
+
 
     if response.status_code == 200:
-        return response.json().get("data", {}).get("author_id")
-    log_message(f"Error fetching author ID for {tweet_id}: {response.status_code}")
+        tweet_data = response.json().get("data", {})
+        
+        # Initialize a list to hold processed tweet information
+        processed_tweets = []
+
+        for tweet in tweet_data:
+            public_metrics = tweet.get("public_metrics")
+
+            tweet_data = {
+                "tweet_id": tweet.get("id"),
+                "author_id": tweet.get("author_id"),
+                "tweet_text": tweet.get("text"),
+                "created_at": tweet.get("created_at"),
+                "like_count": public_metrics.get("like_count"),
+                "retweet_count": public_metrics.get("retweet_count"),
+                "quote_count": public_metrics.get("quote_count"),
+                "reply_count": public_metrics.get("reply_count"),
+                "impression_count": public_metrics.get("impression_count"),
+            }
+
+            processed_tweets.append(tweet_data)
+
+        print("processed_tweets: ", processed_tweets, "\n\n")
+        return processed_tweets
+        
+    log_message(f"Error fetching data for: {response.status_code}")
     return None
 
 
+# can do look up by ids (plural) rather than needing to iterate through each id singularly
 def get_author_from_authorid(author_id):
     """Fetch username from author ID"""
     if not author_id:
@@ -77,43 +148,8 @@ def get_author_from_authorid(author_id):
     return None
 
 
-def process_csv():
-    """Process tweets and fetch author information"""
-    if not os.path.exists(INPUT_CSV):
-        log_message("Error: Input CSV does not exist.")
-        return
-
-    df = pd.read_csv(INPUT_CSV)
-
-    if 'id' not in df.columns:
-        log_message("Error: CSV file must contain an 'id' column.")
-        return
-
-    df['author_id'] = df.get('author_id', None)
-    df['author_username'] = df.get('author_username', None)
-
-    for index, row in df.iterrows():
-        if pd.isna(row['author_id']) or row['author_id'] == "":
-            tweet_id = str(row['id'])
-            author_id = get_authorid_from_post(tweet_id)
-
-            if author_id:
-                username = get_author_from_authorid(author_id)
-                df.at[index, 'author_id'] = author_id
-                df.at[index, 'author_username'] = username
-                log_message(f"Processed Tweet ID: {tweet_id}, Author ID: {author_id}, Username: {username}")
-
-            df.to_csv(OUTPUT_CSV, index=False)
-            log_message(f"Progress saved after processing tweet ID {tweet_id}")
-
-            time.sleep(60)  # Prevent hitting API rate limits
-
-    log_message("Author processing complete.")
-
-if __name__ == "__main__":
-    log_message("Starting script")
-
-    fetch_tweets()
-    process_csv()
-
-    log_message("Script completed")
+# Returns a dataframe with three columns: id, edit_history_tweet_ids, text
+tweets = fetch_tweets()
+processed_tweets = get_context_from_post(tweets)
+#tweet_context = get_context_from_post(tweets)
+#print(tweet_context)
